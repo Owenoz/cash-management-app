@@ -1,19 +1,22 @@
-// Loans.jsx - Responsive Loans Management Component
+// Loans.jsx - Responsive Loans Management Component with Payment History
 import React, { useState } from 'react';
 import {
   Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, TablePagination, TextField, Button, IconButton, Chip, Typography,
   MenuItem, Select, FormControl, InputLabel, Dialog, DialogTitle, DialogContent,
   DialogActions, Grid, Card, CardContent, useTheme, useMediaQuery, InputAdornment,
-  Avatar, Divider, LinearProgress
+  Avatar, Divider, LinearProgress, Collapse, List, ListItem, ListItemText,
+  ListItemAvatar, ListItemSecondaryAction, Badge, Tooltip, Accordion,
+  AccordionSummary, AccordionDetails
 } from '@mui/material';
 import {
   Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon, Payment as PaymentIcon,
   AttachMoney as MoneyIcon, Person as PersonIcon, CalendarToday as CalendarIcon,
-  TrendingDown as PendingIcon, CheckCircle as PaidIcon
+  TrendingDown as PendingIcon, CheckCircle as PaidIcon, ExpandMore as ExpandMoreIcon,
+  History as HistoryIcon, ArrowDownward as ReceivedIcon, Receipt as ReceiptIcon,
+  ExpandLess as ExpandLessIcon, ExpandMore as ExpandMoreIcon2
 } from '@mui/icons-material';
 import { useCashManagement } from '../context/CashManagementContext';
-import { formatCurrency } from '../context/CashManagementContext';
 
 // Safe fallback formatCurrency function
 const safeFormatCurrency = (amount, currency = '₹') => {
@@ -38,6 +41,7 @@ const Loans = () => {
   const [openPaymentDialog, setOpenPaymentDialog] = useState(false);
   const [selectedLoan, setSelectedLoan] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
+  const [expandedLoanId, setExpandedLoanId] = useState(null);
   
   const [newLoan, setNewLoan] = useState({
     personName: '',
@@ -126,6 +130,30 @@ const Loans = () => {
     return ((total - remaining) / total) * 100;
   };
 
+  const toggleExpandLoan = (loanId) => {
+    setExpandedLoanId(expandedLoanId === loanId ? null : loanId);
+  };
+
+  // Get payment history for a loan
+  const getPaymentHistory = (loan) => {
+    if (!loan || !loan.installments) return [];
+    return loan.installments || [];
+  };
+
+  // Get total payments made
+  const getTotalPayments = (loan) => {
+    if (!loan || !loan.installments) return 0;
+    const installments = loan.installments || [];
+    return installments.reduce((sum, installment) => sum + (parseFloat(installment.amount) || 0), 0);
+  };
+
+  // Get next payment due date
+  const getNextPaymentDue = (loan) => {
+    if (!loan || loan.status === 'paid') return 'Paid Off';
+    if (loan.dueDate) return loan.dueDate;
+    return 'No due date set';
+  };
+
   const totalLoans = (state.loans || []).reduce((sum, l) => {
     if (!l) return sum;
     return sum + (parseFloat(l.totalAmount) || 0);
@@ -143,7 +171,7 @@ const Loans = () => {
       {/* Header */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" fontWeight={700} color="#1e293b">Loans Management</Typography>
-        <Typography variant="body2" color="textSecondary">Track loans given to others and payments received</Typography>
+        <Typography variant="body2" color="textSecondary">Track loans given to others with detailed payment history</Typography>
       </Box>
 
       {/* Summary Cards */}
@@ -227,11 +255,13 @@ const Loans = () => {
         <Table>
           <TableHead sx={{ bgcolor: '#f8fafc' }}>
             <TableRow>
+              <TableCell width="50"></TableCell>
               <TableCell>Person</TableCell>
               <TableCell>Date</TableCell>
               {!isMobile && <TableCell>Due Date</TableCell>}
               <TableCell align="right">Amount</TableCell>
-              {!isMobile && <TableCell>Progress</TableCell>}
+              <TableCell align="right">Paid</TableCell>
+              <TableCell align="right">Balance</TableCell>
               <TableCell>Status</TableCell>
               <TableCell align="center">Actions</TableCell>
             </TableRow>
@@ -239,7 +269,7 @@ const Loans = () => {
           <TableBody>
             {filteredLoans.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isMobile ? 6 : 7} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                   <Typography variant="body1" color="textSecondary">
                     No loans found. Add your first loan!
                   </Typography>
@@ -248,85 +278,220 @@ const Loans = () => {
             ) : (
               filteredLoans
                 .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                .map((loan) => (
-                  <TableRow key={loan?.id || Math.random()} hover>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Avatar sx={{ 
-                          bgcolor: '#667eea', 
-                          width: 36, 
-                          height: 36, 
-                          mr: 1.5, 
-                          fontSize: '0.9rem' 
-                        }}>
-                          {loan?.personName?.charAt(0)?.toUpperCase() || '?'}
-                        </Avatar>
-                        <Typography variant="body2" fontWeight={500}>
-                          {loan?.personName || 'Unknown Person'}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{loan?.date || '-'}</Typography>
-                    </TableCell>
-                    {!isMobile && (
-                      <TableCell>
-                        <Typography variant="body2">{loan?.dueDate || '-'}</Typography>
-                      </TableCell>
-                    )}
-                    <TableCell align="right">
-                      <Typography variant="body1" fontWeight={600}>
-                        {safeFormatCurrency(loan?.totalAmount || 0, currency)}
-                      </Typography>
-                    </TableCell>
-                    {!isMobile && (
-                      <TableCell>
-                        <Box sx={{ minWidth: 100 }}>
-                          <LinearProgress 
-                            variant="determinate" 
-                            value={getLoanProgress(loan)} 
-                            sx={{ height: 8, borderRadius: 4 }} 
-                          />
-                          <Typography variant="caption" color="textSecondary">
-                            {safeFormatCurrency(
-                              (parseFloat(loan?.totalAmount) || 0) - (parseFloat(loan?.remainingBalance) || 0), 
-                              currency
-                            )} / {safeFormatCurrency(loan?.totalAmount || 0, currency)}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                    )}
-                    <TableCell>
-                      <Chip 
-                        label={loan?.status === 'active' ? 'Active' : 'Paid'} 
-                        color={loan?.status === 'active' ? 'warning' : 'success'} 
-                        size="small" 
-                      />
-                    </TableCell>
-                    <TableCell align="center">
-                      <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
-                        {loan?.status === 'active' && (
+                .map((loan) => {
+                  const payments = getPaymentHistory(loan);
+                  const totalPaid = getTotalPayments(loan);
+                  const balance = parseFloat(loan.remainingBalance) || 0;
+                  const isExpanded = expandedLoanId === loan.id;
+                  
+                  return (
+                    <React.Fragment key={loan?.id || Math.random()}>
+                      {/* Main Loan Row */}
+                      <TableRow hover>
+                        <TableCell>
                           <IconButton 
                             size="small" 
-                            color="primary" 
-                            onClick={() => openPaymentForLoan(loan)} 
-                            title="Add Payment"
+                            onClick={() => toggleExpandLoan(loan.id)}
+                            disabled={payments.length === 0}
                           >
-                            <PaymentIcon fontSize="small" />
+                            {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                           </IconButton>
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Avatar sx={{ 
+                              bgcolor: '#667eea', 
+                              width: 36, 
+                              height: 36, 
+                              mr: 1.5, 
+                              fontSize: '0.9rem' 
+                            }}>
+                              {loan?.personName?.charAt(0)?.toUpperCase() || '?'}
+                            </Avatar>
+                            <Box>
+                              <Typography variant="body2" fontWeight={500}>
+                                {loan?.personName || 'Unknown Person'}
+                              </Typography>
+                              <Typography variant="caption" color="textSecondary">
+                                {payments.length} payment{payments.length !== 1 ? 's' : ''}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">{loan?.date || '-'}</Typography>
+                        </TableCell>
+                        {!isMobile && (
+                          <TableCell>
+                            <Typography variant="body2">
+                              {getNextPaymentDue(loan)}
+                            </Typography>
+                          </TableCell>
                         )}
-                        <IconButton 
-                          size="small" 
-                          color="error" 
-                          onClick={() => handleDeleteLoan(loan?.id)} 
-                          title="Delete"
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                ))
+                        <TableCell align="right">
+                          <Typography variant="body1" fontWeight={600}>
+                            {safeFormatCurrency(loan?.totalAmount || 0, currency)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography variant="body1" color="success.main" fontWeight={500}>
+                            {safeFormatCurrency(totalPaid, currency)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography variant="body1" color="warning.main" fontWeight={500}>
+                            {safeFormatCurrency(balance, currency)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={loan?.status === 'active' ? 'Active' : 'Paid'} 
+                            color={loan?.status === 'active' ? 'warning' : 'success'} 
+                            size="small" 
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
+                            {loan?.status === 'active' && (
+                              <Tooltip title="Add Payment">
+                                <IconButton 
+                                  size="small" 
+                                  color="primary" 
+                                  onClick={() => openPaymentForLoan(loan)}
+                                >
+                                  <PaymentIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            <Tooltip title="View History">
+                              <IconButton 
+                                size="small" 
+                                color="info"
+                                onClick={() => toggleExpandLoan(loan.id)}
+                                disabled={payments.length === 0}
+                              >
+                                <HistoryIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete">
+                              <IconButton 
+                                size="small" 
+                                color="error" 
+                                onClick={() => handleDeleteLoan(loan?.id)}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                      
+                      {/* Payment History Expandable Row */}
+                      {isExpanded && payments.length > 0 && (
+                        <TableRow sx={{ bgcolor: '#fafafa' }}>
+                          <TableCell colSpan={9} style={{ paddingTop: 0, paddingBottom: 0 }}>
+                            <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                              <Box sx={{ p: 2, pl: 6 }}>
+                                <Typography variant="subtitle2" gutterBottom color="primary">
+                                  📋 Payment History - {loan.personName}
+                                </Typography>
+                                <Paper variant="outlined" sx={{ p: 2, bgcolor: '#fefefe' }}>
+                                  {payments.length === 0 ? (
+                                    <Typography variant="body2" color="textSecondary" align="center" py={2}>
+                                      No payments made yet
+                                    </Typography>
+                                  ) : (
+                                    <List dense>
+                                      {payments.map((payment, index) => (
+                                        <ListItem 
+                                          key={index}
+                                          divider={index < payments.length - 1}
+                                          sx={{ 
+                                            borderRadius: 1,
+                                            mb: 0.5,
+                                            '&:hover': { bgcolor: '#f5f5f5' }
+                                          }}
+                                        >
+                                          <ListItemAvatar>
+                                            <Avatar sx={{ bgcolor: '#4caf50', width: 32, height: 32 }}>
+                                              <ReceivedIcon fontSize="small" />
+                                            </Avatar>
+                                          </ListItemAvatar>
+                                          <ListItemText
+                                            primary={
+                                              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                <Typography variant="body2" fontWeight={500}>
+                                                  {safeFormatCurrency(payment.amount || 0, currency)}
+                                                </Typography>
+                                                <Typography variant="caption" color="textSecondary">
+                                                  {payment.date || 'No date'}
+                                                </Typography>
+                                              </Box>
+                                            }
+                                            secondary={
+                                              <Typography variant="caption" color="textSecondary">
+                                                {payment.notes || 'No notes'}
+                                              </Typography>
+                                            }
+                                          />
+                                          <ListItemSecondaryAction>
+                                            <Chip 
+                                              label={`#${index + 1}`} 
+                                              size="small" 
+                                              variant="outlined"
+                                              color="primary"
+                                            />
+                                          </ListItemSecondaryAction>
+                                        </ListItem>
+                                      ))}
+                                    </List>
+                                  )}
+                                  
+                                  {/* Summary */}
+                                  <Box sx={{ mt: 2, p: 2, bgcolor: '#f8f9fa', borderRadius: 1 }}>
+                                    <Grid container spacing={1}>
+                                      <Grid item xs={12} sm={4}>
+                                        <Typography variant="body2" color="textSecondary">
+                                          Total Paid:
+                                        </Typography>
+                                        <Typography variant="h6" color="success.main">
+                                          {safeFormatCurrency(totalPaid, currency)}
+                                        </Typography>
+                                      </Grid>
+                                      <Grid item xs={12} sm={4}>
+                                        <Typography variant="body2" color="textSecondary">
+                                          Remaining:
+                                        </Typography>
+                                        <Typography variant="h6" color="warning.main">
+                                          {safeFormatCurrency(balance, currency)}
+                                        </Typography>
+                                      </Grid>
+                                      <Grid item xs={12} sm={4}>
+                                        <Typography variant="body2" color="textSecondary">
+                                          Progress:
+                                        </Typography>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                          <LinearProgress 
+                                            variant="determinate" 
+                                            value={getLoanProgress(loan)} 
+                                            sx={{ flexGrow: 1, height: 6, borderRadius: 3 }}
+                                          />
+                                          <Typography variant="caption" fontWeight={500}>
+                                            {Math.round(getLoanProgress(loan))}%
+                                          </Typography>
+                                        </Box>
+                                      </Grid>
+                                    </Grid>
+                                  </Box>
+                                </Paper>
+                              </Box>
+                            </Collapse>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
+                  );
+                })
             )}
           </TableBody>
         </Table>
@@ -440,11 +605,25 @@ const Loans = () => {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 3 }}>
-            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-              Remaining Balance: <strong>
-                {selectedLoan && safeFormatCurrency(selectedLoan.remainingBalance || 0, currency)}
-              </strong>
-            </Typography>
+            <Grid container spacing={2} sx={{ mb: 2 }}>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="textSecondary">
+                  Total Loan:
+                </Typography>
+                <Typography variant="h6">
+                  {selectedLoan && safeFormatCurrency(selectedLoan.totalAmount || 0, currency)}
+                </Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="textSecondary">
+                  Remaining:
+                </Typography>
+                <Typography variant="h6" color="warning.main">
+                  {selectedLoan && safeFormatCurrency(selectedLoan.remainingBalance || 0, currency)}
+                </Typography>
+              </Grid>
+            </Grid>
+            
             <TextField 
               fullWidth 
               label="Payment Amount" 
@@ -452,10 +631,15 @@ const Loans = () => {
               value={payment.amount} 
               onChange={(e) => setPayment({...payment, amount: e.target.value})}
               InputProps={{ 
-                startAdornment: <Typography sx={{ mr: 1 }}>{currency}</Typography> 
+                startAdornment: <Typography sx={{ mr: 1 }}>{currency}</Typography>,
+                inputProps: { 
+                  max: selectedLoan?.remainingBalance || 0,
+                  min: 0
+                }
               }} 
               sx={{ mb: 2 }} 
               required 
+              helperText={`Max: ${safeFormatCurrency(selectedLoan?.remainingBalance || 0, currency)}`}
             />
             <TextField 
               fullWidth 
@@ -471,6 +655,7 @@ const Loans = () => {
               label="Notes" 
               value={payment.notes} 
               onChange={(e) => setPayment({...payment, notes: e.target.value})} 
+              placeholder="e.g., Cash payment, Bank transfer, etc."
             />
           </Box>
         </DialogContent>
@@ -484,7 +669,7 @@ const Loans = () => {
               '&:hover': { bgcolor: '#15803d' } 
             }}
           >
-            Add Payment
+            Record Payment
           </Button>
         </DialogActions>
       </Dialog>
