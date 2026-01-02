@@ -1,0 +1,129 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user owns the data
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Helper function to validate user data structure
+    function isValidUserData() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['data', 'updatedAt']) ||
+             data.keys().hasAll(['balance', 'transactions']);
+    }
+    
+    // Helper function to validate transaction data
+    function isValidTransaction() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['id', 'type', 'amount', 'date']) &&
+             data.type in ['income', 'expense'] &&
+             data.amount is number &&
+             data.amount > 0;
+    }
+    
+    // Helper function to validate loan data
+    function isValidLoan() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['id', 'borrowerName', 'amount', 'date']) &&
+             data.amount is number &&
+             data.amount > 0;
+    }
+    
+    // Helper function to validate saving data
+    function isValidSaving() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['id', 'name', 'openingBalance', 'date']) &&
+             data.openingBalance is number;
+    }
+    
+    // Helper function to validate goods debt data
+    function isValidGoodsDebt() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['id', 'customerName', 'totalAmount', 'date']) &&
+             data.totalAmount is number &&
+             data.totalAmount > 0;
+    }
+    
+    // Helper function to validate owner withdrawal data
+    function isValidOwnerWithdrawal() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['id', 'amount', 'date', 'account']) &&
+             data.amount is number &&
+             data.amount > 0 &&
+             data.account in ['bank', 'cash'];
+    }
+    
+    // Users collection - Main collection for user data
+    match /users/{userId} {
+      // Allow read if user owns the data
+      allow read: if isOwner(userId);
+      
+      // Allow create if authenticated and data is valid
+      allow create: if isAuthenticated() && 
+                      request.auth.uid == userId &&
+                      isValidUserData();
+      
+      // Allow update if user owns the data and data structure is valid
+      allow update: if isOwner(userId) && isValidUserData();
+      
+      // Allow delete if user owns the document
+      allow delete: if isOwner(userId);
+      
+      // Subcollections under users
+      match /transactions/{transactionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidTransaction();
+        allow update: if isOwner(userId) && isValidTransaction();
+        allow delete: if isOwner(userId);
+      }
+      
+      match /loans/{loanId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidLoan();
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+      
+      match /savings/{savingId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidSaving();
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+      
+      match /goodsDebts/{goodsDebtId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidGoodsDebt();
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+      
+      match /ownerWithdrawals/{withdrawalId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidOwnerWithdrawal();
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+    
+    // Public collection for app metadata (if needed)
+    match /app/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+    
+    // Default deny - no access to other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
