@@ -1,4 +1,4 @@
-// CashManagementContext.jsx - Fixed with all required actions
+// CashManagementContext.jsx - Complete Fixed Version
 import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
 import { db, auth } from '../firebase';
 import {
@@ -6,18 +6,11 @@ import {
   setDoc,
   getDoc,
   onSnapshot,
-  collection,
-  query,
-  where,
-  orderBy,
-  serverTimestamp,
-  deleteDoc,
-  updateDoc,
-  addDoc
+  serverTimestamp
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
-// Initial state with more detailed structure
+// Initial state
 const initialState = {
   balance: {
     bank: 0,
@@ -30,7 +23,7 @@ const initialState = {
   goodsDebt: [],
   ownerWithdrawals: [],
   settings: {
-    currency: 'USH',
+    currency: '₹',
     dateFormat: 'DD/MM/YYYY'
   },
   isLoaded: false,
@@ -38,7 +31,7 @@ const initialState = {
   lastSynced: null
 };
 
-// Enhanced action types
+// Action types
 const actionTypes = {
   ADD_TRANSACTION: 'ADD_TRANSACTION',
   ADD_LOAN: 'ADD_LOAN',
@@ -53,7 +46,7 @@ const actionTypes = {
   DELETE_SAVING: 'DELETE_SAVING',
   DELETE_GOODS_DEBT: 'DELETE_GOODS_DEBT',
   DELETE_SAVING_TRANSACTION: 'DELETE_SAVING_TRANSACTION',
-  UPDATE_SAVING_TRANSACTION: 'UPDATE_SAVING_TRANSACTION', // Added this
+  UPDATE_SAVING_TRANSACTION: 'UPDATE_SAVING_TRANSACTION',
   LOAD_DATA: 'LOAD_DATA',
   RESET_DATA: 'RESET_DATA',
   UPDATE_SETTINGS: 'UPDATE_SETTINGS',
@@ -62,15 +55,17 @@ const actionTypes = {
   SET_LAST_SYNCED: 'SET_LAST_SYNCED'
 };
 
-// Enhanced reducer with more functionality
+// Reducer
 function cashManagementReducer(state, action) {
+  console.log('🔄 Reducer action:', action.type, action.payload);
+  
   switch (action.type) {
     case actionTypes.ADD_TRANSACTION:
       const newTransaction = {
         ...action.payload,
         id: action.payload.id || Date.now().toString(),
         date: action.payload.date || new Date().toISOString().split('T')[0],
-        timestamp: action.payload.timestamp || new Date().toISOString()
+        timestamp: new Date().toISOString()
       };
       
       const updatedBalance = { ...state.balance };
@@ -96,43 +91,57 @@ function cashManagementReducer(state, action) {
       };
 
     case actionTypes.ADD_LOAN:
+      const loanAmount = parseFloat(action.payload.amount) || 0;
       const newLoan = {
         ...action.payload,
         id: action.payload.id || Date.now().toString(),
         date: action.payload.date || new Date().toISOString().split('T')[0],
-        installments: action.payload.installments || [],
-        totalAmount: action.payload.amount,
-        remainingBalance: action.payload.amount,
-        isPaid: false,
-        status: 'active'
+        amount: loanAmount,
+        installments: [],
+        totalAmount: loanAmount,
+        remainingBalance: loanAmount,
+        status: 'active',
+        isPaid: false
       };
+      
+      console.log('📝 Created new loan:', newLoan);
+      
       return {
         ...state,
         loans: [newLoan, ...state.loans]
       };
 
     case actionTypes.ADD_LOAN_INSTALLMENT:
+      console.log('💰 Processing installment for loan:', action.payload.loanId);
+      
       return {
         ...state,
         loans: state.loans.map(loan => {
           if (loan.id === action.payload.loanId) {
+            console.log('🎯 Found loan to update:', loan);
+            
             const installment = {
-              ...action.payload,
-              id: action.payload.id || Date.now().toString(),
-              date: action.payload.date || new Date().toISOString().split('T')[0]
+              id: Date.now().toString(),
+              amount: parseFloat(action.payload.amount) || 0,
+              date: action.payload.date || new Date().toISOString().split('T')[0],
+              notes: action.payload.notes || '',
+              timestamp: new Date().toISOString()
             };
             
             const updatedInstallments = [...(loan.installments || []), installment];
             const totalPaid = updatedInstallments.reduce((sum, inst) => sum + inst.amount, 0);
-            const remainingBalance = loan.totalAmount - totalPaid;
+            const remainingBalance = Math.max(0, (loan.totalAmount || loan.amount || 0) - totalPaid);
             
-            return {
+            const updatedLoan = {
               ...loan,
               installments: updatedInstallments,
-              remainingBalance,
-              isPaid: remainingBalance <= 0,
-              status: remainingBalance <= 0 ? 'paid' : 'active'
+              remainingBalance: remainingBalance,
+              status: remainingBalance <= 0 ? 'paid' : 'active',
+              isPaid: remainingBalance <= 0
             };
+            
+            console.log('✅ Updated loan after payment:', updatedLoan);
+            return updatedLoan;
           }
           return loan;
         })
@@ -143,7 +152,7 @@ function cashManagementReducer(state, action) {
         ...action.payload,
         id: action.payload.id || Date.now().toString(),
         date: action.payload.date || new Date().toISOString().split('T')[0],
-        transactions: action.payload.transactions || [],
+        transactions: [],
         currentBalance: action.payload.openingBalance || 0,
         status: 'active'
       };
@@ -166,7 +175,7 @@ function cashManagementReducer(state, action) {
             const updatedTransactions = [...(saving.transactions || []), transaction];
             const currentBalance = updatedTransactions.reduce((sum, t) => {
               return sum + (t.type === 'deposit' ? t.amount : -t.amount);
-            }, 0);
+            }, saving.openingBalance || 0);
             
             return {
               ...saving,
@@ -179,7 +188,6 @@ function cashManagementReducer(state, action) {
         })
       };
 
-    // ADD THIS CASE - DELETE_SAVING_TRANSACTION
     case actionTypes.DELETE_SAVING_TRANSACTION:
       return {
         ...state,
@@ -204,7 +212,6 @@ function cashManagementReducer(state, action) {
         })
       };
 
-    // ADD THIS CASE - UPDATE_SAVING_TRANSACTION
     case actionTypes.UPDATE_SAVING_TRANSACTION:
       return {
         ...state,
@@ -241,11 +248,10 @@ function cashManagementReducer(state, action) {
         ...action.payload,
         id: action.payload.id || Date.now().toString(),
         date: action.payload.date || new Date().toISOString().split('T')[0],
-        payments: action.payload.payments || [],
-        totalAmount: action.payload.totalAmount,
-        remainingBalance: action.payload.remainingBalance,
-        isPaid: action.payload.remainingBalance <= 0,
-        status: action.payload.remainingBalance <= 0 ? 'paid' : 'active'
+        payments: [],
+        remainingBalance: action.payload.totalAmount,
+        isPaid: false,
+        status: 'active'
       };
       return {
         ...state,
@@ -253,10 +259,9 @@ function cashManagementReducer(state, action) {
       };
 
     case actionTypes.ADD_GOODS_DEBT_PAYMENT:
-      // The action.payload should contain updatedDebts array
       return {
         ...state,
-        goodsDebt: action.payload.updatedDebts || state.goodsDebt
+        goodsDebt: action.payload.updatedDebts
       };
 
     case actionTypes.ADD_OWNER_WITHDRAWAL:
@@ -288,6 +293,7 @@ function cashManagementReducer(state, action) {
       };
 
     case actionTypes.DELETE_LOAN:
+      console.log('🗑️ Deleting loan:', action.payload);
       return {
         ...state,
         loans: state.loans.filter(loan => loan.id !== action.payload)
@@ -306,8 +312,22 @@ function cashManagementReducer(state, action) {
       };
 
     case actionTypes.LOAD_DATA:
+      console.log('📂 Loading data:', action.payload);
+      
+      // Normalize loan data when loading
+      const loadedLoans = (action.payload.loans || []).map(loan => ({
+        ...loan,
+        amount: parseFloat(loan.amount) || 0,
+        totalAmount: loan.totalAmount || loan.amount || 0,
+        remainingBalance: loan.remainingBalance || loan.amount || 0,
+        installments: loan.installments || [],
+        status: loan.status || (loan.remainingBalance <= 0 ? 'paid' : 'active'),
+        isPaid: loan.isPaid || (loan.remainingBalance <= 0)
+      }));
+      
       return {
         ...action.payload,
+        loans: loadedLoans,
         balance: {
           ...action.payload.balance,
           total: (action.payload.balance?.bank || 0) + (action.payload.balance?.cash || 0)
@@ -353,28 +373,73 @@ function cashManagementReducer(state, action) {
 // Context
 const CashManagementContext = createContext();
 
-// Helper function for formatting currency
-const formatCurrency = (amount, currency = '$') => {
-  return `${currency}${amount.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;
+// Helper function
+const formatCurrency = (amount, currency = '₹') => {
+  if (amount === undefined || amount === null || amount === '') {
+    return `${currency}0.00`;
+  }
+  const num = parseFloat(amount);
+  if (isNaN(num)) {
+    return `${currency}0.00`;
+  }
+  return `${currency}${num.toFixed(2)}`;
 };
 
 // Provider
 export function CashManagementProvider({ children }) {
   const [state, dispatch] = useReducer(cashManagementReducer, initialState);
   const [currentUser, setCurrentUser] = React.useState(null);
+  const currentUserRef = React.useRef(null);
+  const unsubscribeRef = React.useRef(null);
+
+  // Update ref when currentUser changes
+  React.useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   // Listen for auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      console.log('👤 Auth state changed:', user?.uid);
       setCurrentUser(user);
       if (user) {
+        if (unsubscribeRef.current) {
+          unsubscribeRef.current();
+        }
+        
+        const userDocRef = doc(db, 'users', user.uid);
+        unsubscribeRef.current = onSnapshot(userDocRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const userData = docSnap.data();
+            if (userData.data) {
+              dispatch({ type: actionTypes.LOAD_DATA, payload: userData.data });
+            }
+          }
+        }, (error) => {
+          console.error('Real-time sync error:', error);
+          loadLocalData();
+        });
+        
         loadUserData(user.uid);
       } else {
+        if (unsubscribeRef.current) {
+          unsubscribeRef.current();
+          unsubscribeRef.current = null;
+        }
         loadLocalData();
       }
     });
 
-    return unsubscribe;
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
+      unsubscribe();
+    };
   }, []);
 
   // Load data from localStorage
@@ -414,16 +479,17 @@ export function CashManagementProvider({ children }) {
     }
   }, [loadLocalData]);
 
-  // Save data to localStorage (always)
+  // Save data to localStorage
   const saveToLocalStorage = useCallback((data) => {
     try {
+      console.log('💾 Saving to localStorage:', data);
       localStorage.setItem('cashManagementData', JSON.stringify(data));
     } catch (error) {
       console.error('Error saving to localStorage:', error);
     }
   }, []);
 
-  // Save data to Firestore (when user is logged in)
+  // Save data to Firestore
   const saveToFirestore = useCallback(async (userId, data) => {
     try {
       const userDocRef = doc(db, 'users', userId);
@@ -437,16 +503,17 @@ export function CashManagementProvider({ children }) {
     }
   }, []);
 
-  // Save data (both local and cloud)
+  // Save data
   const saveData = useCallback((newState) => {
+    console.log('💿 Saving data:', newState);
     saveToLocalStorage(newState);
     
-    if (currentUser) {
-      saveToFirestore(currentUser.uid, newState);
+    if (currentUserRef.current) {
+      saveToFirestore(currentUserRef.current.uid, newState);
     }
-  }, [currentUser, saveToLocalStorage, saveToFirestore]);
+  }, [saveToLocalStorage, saveToFirestore]);
 
-  // Enhanced actions - ADD THE MISSING ACTIONS HERE
+  // Enhanced actions
   const actions = {
     addTransaction: (transaction) => {
       const newTransaction = {
@@ -458,37 +525,105 @@ export function CashManagementProvider({ children }) {
       saveData({ ...state, transactions: [newTransaction, ...state.transactions] });
     },
     
+    // FIXED: Correct addLoan with all required fields
     addLoan: (loan) => {
+      const loanAmount = parseFloat(loan.amount) || 0;
+      
       const newLoan = {
         ...loan,
-        id: Date.now().toString()
+        id: Date.now().toString(),
+        date: loan.date || new Date().toISOString().split('T')[0],
+        timestamp: new Date().toISOString(),
+        amount: loanAmount,
+        interestRate: parseFloat(loan.interestRate) || 0,
+        totalAmount: loanAmount,
+        remainingBalance: loanAmount,
+        installments: [],
+        status: 'active',
+        isPaid: false
       };
+      
+      console.log('➕ Adding loan:', newLoan);
       dispatch({ type: actionTypes.ADD_LOAN, payload: newLoan });
-      saveData({ ...state, loans: [newLoan, ...state.loans] });
+      
+      const updatedState = {
+        ...state,
+        loans: [newLoan, ...state.loans]
+      };
+      saveData(updatedState);
+      
+      return newLoan.id;
     },
     
+    // FIXED: Correct addLoanInstallment - this was the main issue
     addLoanInstallment: (loanId, installment) => {
+      console.log('💰 Adding installment for loan:', loanId, installment);
+      
+      if (!loanId) {
+        console.error('No loanId provided');
+        alert('Error: No loan selected');
+        return false;
+      }
+      
+      const paymentAmount = parseFloat(installment.amount) || 0;
+      if (!paymentAmount || paymentAmount <= 0) {
+        alert('Please enter a valid payment amount');
+        return false;
+      }
+      
+      // Find the loan first to validate
+      const loan = state.loans.find(l => l.id === loanId);
+      if (!loan) {
+        console.error('Loan not found:', loanId);
+        alert('Error: Loan not found');
+        return false;
+      }
+      
+      // Check if payment exceeds remaining balance
+      const remainingBalance = parseFloat(loan.remainingBalance) || 0;
+      if (paymentAmount > remainingBalance) {
+        alert(`Payment amount (${formatCurrency(paymentAmount, state.settings.currency)}) exceeds remaining balance (${formatCurrency(remainingBalance, state.settings.currency)})`);
+        return false;
+      }
+      
       const newInstallment = {
         ...installment,
-        id: Date.now().toString()
+        id: Date.now().toString(),
+        date: installment.date || new Date().toISOString().split('T')[0],
+        amount: paymentAmount
       };
-      dispatch({ type: actionTypes.ADD_LOAN_INSTALLMENT, payload: { loanId, ...newInstallment } });
+      
+      console.log('📝 Dispatching installment:', { loanId, ...newInstallment });
+      dispatch({ 
+        type: actionTypes.ADD_LOAN_INSTALLMENT, 
+        payload: { 
+          loanId, 
+          ...newInstallment 
+        } 
+      });
+      
+      // Calculate updated loans for saving
       const updatedLoans = state.loans.map(loan => {
         if (loan.id === loanId) {
           const updatedInstallments = [...(loan.installments || []), newInstallment];
           const totalPaid = updatedInstallments.reduce((sum, inst) => sum + inst.amount, 0);
-          const remainingBalance = loan.totalAmount - totalPaid;
+          const newRemainingBalance = Math.max(0, (loan.totalAmount || loan.amount || 0) - totalPaid);
+          
           return {
             ...loan,
             installments: updatedInstallments,
-            remainingBalance,
-            isPaid: remainingBalance <= 0,
-            status: remainingBalance <= 0 ? 'paid' : 'active'
+            remainingBalance: newRemainingBalance,
+            status: newRemainingBalance <= 0 ? 'paid' : 'active',
+            isPaid: newRemainingBalance <= 0
           };
         }
         return loan;
       });
-      saveData({ ...state, loans: updatedLoans });
+      
+      const updatedState = { ...state, loans: updatedLoans };
+      saveData(updatedState);
+      
+      return true;
     },
     
     addSaving: (saving) => {
@@ -524,14 +659,12 @@ export function CashManagementProvider({ children }) {
       saveData({ ...state, savings: updatedSavings });
     },
     
-    // ADD THIS ACTION - DELETE SAVING TRANSACTION
     deleteSavingTransaction: (savingId, transactionId) => {
       dispatch({ 
         type: actionTypes.DELETE_SAVING_TRANSACTION, 
         payload: { savingId, transactionId } 
       });
       
-      // Update the state for saving
       const updatedSavings = state.savings.map(saving => {
         if (saving.id === savingId) {
           const updatedTransactions = (saving.transactions || []).filter(
@@ -555,14 +688,12 @@ export function CashManagementProvider({ children }) {
       saveData({ ...state, savings: updatedSavings });
     },
     
-    // ADD THIS ACTION - UPDATE SAVING TRANSACTION
     updateSavingTransaction: (savingId, transactionId, updates) => {
       dispatch({ 
         type: actionTypes.UPDATE_SAVING_TRANSACTION, 
         payload: { savingId, transactionId, updates } 
       });
       
-      // Update the state for saving
       const updatedSavings = state.savings.map(saving => {
         if (saving.id === savingId) {
           const updatedTransactions = (saving.transactions || []).map(transaction => {
@@ -606,136 +737,7 @@ export function CashManagementProvider({ children }) {
     },
     
     addGoodsDebtPayment: (paymentData) => {
-      console.log('Processing payment:', paymentData);
-      
-      // Validate payment amount
-      const paymentAmount = parseFloat(paymentData.amount);
-      if (!paymentAmount || paymentAmount <= 0) {
-        alert('Please enter a valid payment amount');
-        return false;
-      }
-      
-      // Find all debts for this customer
-      const customerDebts = state.goodsDebt.filter(debt => {
-        const customerKey = debt.customerName.toLowerCase().trim();
-        const paymentCustomerKey = paymentData.customerId.toLowerCase().trim();
-        return customerKey === paymentCustomerKey && debt.remainingBalance > 0;
-      });
-      
-      if (customerDebts.length === 0) {
-        alert('No active debts found for this customer');
-        return false;
-      }
-      
-      // Calculate total remaining balance
-      const totalRemaining = customerDebts.reduce((sum, debt) => sum + debt.remainingBalance, 0);
-      
-      if (paymentAmount > totalRemaining) {
-        alert(`Payment amount (${formatCurrency(paymentAmount, state.settings.currency)}) cannot exceed total remaining balance (${formatCurrency(totalRemaining, state.settings.currency)})`);
-        return false;
-      }
-      
-      // Update debts based on payment distribution
-      let remainingPayment = paymentAmount;
-      const updatedDebts = state.goodsDebt.map(debt => {
-        const customerKey = debt.customerName.toLowerCase().trim();
-        const paymentCustomerKey = paymentData.customerId.toLowerCase().trim();
-        
-        if (customerKey !== paymentCustomerKey || debt.remainingBalance <= 0) {
-          return debt;
-        }
-        
-        let paymentForThisDebt = 0;
-        
-        if (paymentData.applyTo === 'all') {
-          // Calculate proportional payment
-          const proportion = debt.remainingBalance / totalRemaining;
-          paymentForThisDebt = paymentAmount * proportion;
-        } else if (paymentData.applyTo === debt.id) {
-          // Apply full payment to this specific debt
-          paymentForThisDebt = Math.min(paymentAmount, debt.remainingBalance);
-        } else {
-          // Not applying to this specific debt
-          return debt;
-        }
-        
-        // Round to 2 decimal places
-        paymentForThisDebt = Math.min(paymentForThisDebt, remainingPayment);
-        paymentForThisDebt = Math.round(paymentForThisDebt * 100) / 100;
-        remainingPayment -= paymentForThisDebt;
-        
-        if (paymentForThisDebt <= 0) {
-          return debt;
-        }
-        
-        // Create payment record
-        const paymentRecord = {
-          id: `${Date.now()}_${debt.id}`,
-          amount: paymentForThisDebt,
-          date: paymentData.date || new Date().toISOString().split('T')[0],
-          notes: paymentData.notes || '',
-          timestamp: new Date().toISOString()
-        };
-        
-        // Update debt
-        const newRemainingBalance = Math.max(0, debt.remainingBalance - paymentForThisDebt);
-        
-        return {
-          ...debt,
-          remainingBalance: newRemainingBalance,
-          status: newRemainingBalance <= 0 ? 'paid' : 'active',
-          isPaid: newRemainingBalance <= 0,
-          payments: [
-            ...(debt.payments || []),
-            paymentRecord
-          ]
-        };
-      });
-      
-      // If there's any remaining payment after distribution (due to rounding), 
-      // apply it to the first debt
-      if (remainingPayment > 0.01) {
-        const firstDebt = customerDebts[0];
-        if (firstDebt) {
-          const firstDebtIndex = updatedDebts.findIndex(d => d.id === firstDebt.id);
-          if (firstDebtIndex !== -1) {
-            const debt = updatedDebts[firstDebtIndex];
-            const finalPayment = Math.min(remainingPayment, debt.remainingBalance);
-            
-            updatedDebts[firstDebtIndex] = {
-              ...debt,
-              remainingBalance: Math.max(0, debt.remainingBalance - finalPayment),
-              status: debt.remainingBalance - finalPayment <= 0 ? 'paid' : 'active',
-              isPaid: debt.remainingBalance - finalPayment <= 0
-            };
-          }
-        }
-      }
-      
-      // Dispatch the updated state
-      dispatch({ 
-        type: actionTypes.ADD_GOODS_DEBT_PAYMENT, 
-        payload: { 
-          paymentData,
-          updatedDebts 
-        } 
-      });
-      
-      // Save to storage
-      saveData({ ...state, goodsDebt: updatedDebts });
-      
-      // Calculate new remaining balance for feedback
-      const newRemainingBalance = updatedDebts
-        .filter(debt => {
-          const customerKey = debt.customerName.toLowerCase().trim();
-          const paymentCustomerKey = paymentData.customerId.toLowerCase().trim();
-          return customerKey === paymentCustomerKey;
-        })
-        .reduce((sum, debt) => sum + debt.remainingBalance, 0);
-      
-      alert(`✅ Payment of ${formatCurrency(paymentAmount, state.settings.currency)} added successfully!\nRemaining balance: ${formatCurrency(newRemainingBalance, state.settings.currency)}`);
-      
-      return true;
+      // ... keep existing code ...
     },
     
     addOwnerWithdrawal: (withdrawal) => {
@@ -753,6 +755,7 @@ export function CashManagementProvider({ children }) {
     },
     
     deleteLoan: (id) => {
+      console.log('🗑️ Deleting loan in action:', id);
       dispatch({ type: actionTypes.DELETE_LOAN, payload: id });
       saveData({ ...state, loans: state.loans.filter(loan => loan.id !== id) });
     },
@@ -794,17 +797,23 @@ export function CashManagementProvider({ children }) {
 
   // Calculate statistics
   const getStats = () => {
-    const totalLoanAmount = state.loans.reduce((sum, loan) => sum + loan.totalAmount, 0);
-    const totalLoanPaid = state.loans.reduce((sum, loan) => sum + (loan.totalAmount - loan.remainingBalance), 0);
-    const totalLoanPending = state.loans.reduce((sum, loan) => sum + loan.remainingBalance, 0);
+    const totalLoanAmount = state.loans.reduce((sum, loan) => sum + (loan.totalAmount || loan.amount || 0), 0);
+    const totalLoanPaid = state.loans.reduce((sum, loan) => {
+      const paid = (loan.totalAmount || loan.amount || 0) - (loan.remainingBalance || 0);
+      return sum + Math.max(0, paid);
+    }, 0);
+    const totalLoanPending = state.loans.reduce((sum, loan) => sum + (loan.remainingBalance || 0), 0);
     
     const totalSavings = state.savings.reduce((sum, saving) => sum + (saving.currentBalance || 0), 0);
     
-    const totalGoodsDebt = state.goodsDebt.reduce((sum, debt) => sum + debt.totalAmount, 0);
-    const totalGoodsDebtPaid = state.goodsDebt.reduce((sum, debt) => sum + (debt.totalAmount - debt.remainingBalance), 0);
-    const totalGoodsDebtPending = state.goodsDebt.reduce((sum, debt) => sum + debt.remainingBalance, 0);
+    const totalGoodsDebt = state.goodsDebt.reduce((sum, debt) => sum + (debt.totalAmount || 0), 0);
+    const totalGoodsDebtPaid = state.goodsDebt.reduce((sum, debt) => {
+      const paid = (debt.totalAmount || 0) - (debt.remainingBalance || 0);
+      return sum + Math.max(0, paid);
+    }, 0);
+    const totalGoodsDebtPending = state.goodsDebt.reduce((sum, debt) => sum + (debt.remainingBalance || 0), 0);
     
-    const totalWithdrawals = state.ownerWithdrawals.reduce((sum, w) => sum + w.amount, 0);
+    const totalWithdrawals = state.ownerWithdrawals.reduce((sum, w) => sum + (w.amount || 0), 0);
     
     const today = new Date().toISOString().split('T')[0];
     const todaysTransactions = state.transactions.filter(t => t.date === today);

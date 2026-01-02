@@ -1,24 +1,22 @@
-// Loans.jsx - Responsive Loans Management Component with Payment History
-import React, { useState } from 'react';
+// Loans.jsx - Complete Fixed Version
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, TablePagination, TextField, Button, IconButton, Chip, Typography,
   MenuItem, Select, FormControl, InputLabel, Dialog, DialogTitle, DialogContent,
-  DialogActions, Grid, Card, CardContent, useTheme, useMediaQuery, InputAdornment,
-  Avatar, Divider, LinearProgress, Collapse, List, ListItem, ListItemText,
-  ListItemAvatar, ListItemSecondaryAction, Badge, Tooltip, Accordion,
-  AccordionSummary, AccordionDetails
+  DialogActions, Grid, Card, CardContent, useTheme, useMediaQuery,
+  Avatar, LinearProgress, Collapse, List, ListItem, ListItemText,
+  ListItemAvatar, ListItemSecondaryAction, Tooltip
 } from '@mui/material';
 import {
-  Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon, Payment as PaymentIcon,
-  AttachMoney as MoneyIcon, Person as PersonIcon, CalendarToday as CalendarIcon,
-  TrendingDown as PendingIcon, CheckCircle as PaidIcon, ExpandMore as ExpandMoreIcon,
-  History as HistoryIcon, ArrowDownward as ReceivedIcon, Receipt as ReceiptIcon,
-  ExpandLess as ExpandLessIcon, ExpandMore as ExpandMoreIcon2
+  Add as AddIcon, Delete as DeleteIcon, Payment as PaymentIcon,
+  AttachMoney as MoneyIcon, TrendingDown as PendingIcon, CheckCircle as PaidIcon,
+  ExpandMore as ExpandMoreIcon, History as HistoryIcon, ArrowDownward as ReceivedIcon,
+  ExpandLess as ExpandLessIcon
 } from '@mui/icons-material';
 import { useCashManagement } from '../context/CashManagementContext';
 
-// Safe fallback formatCurrency function
+// Safe format currency
 const safeFormatCurrency = (amount, currency = '₹') => {
   if (amount === undefined || amount === null || amount === '') {
     return `${currency} 0.00`;
@@ -58,120 +56,221 @@ const Loans = () => {
     notes: '' 
   });
 
-  const filteredLoans = (state.loans || []).filter(loan => {
-    if (!loan) return false;
-    if (filterStatus === 'all') return true;
-    return loan.status === filterStatus;
-  });
+  // Debug: Monitor state changes
+  useEffect(() => {
+    console.log('📊 Loans state updated:', state.loans?.length || 0, 'loans');
+    console.log('Full loans array:', state.loans);
+  }, [state.loans]);
 
+  // Normalize loan data
+  const normalizedLoans = useMemo(() => {
+    return (state.loans || []).map((loan, index) => {
+      // Ensure all required fields exist
+      const loanAmount = parseFloat(loan.amount) || 0;
+      const totalAmount = parseFloat(loan.totalAmount) || loanAmount;
+      const remainingBalance = parseFloat(loan.remainingBalance) || loanAmount;
+      const installments = loan.installments || [];
+      
+      // Calculate total paid from installments
+      const totalPaid = installments.reduce((sum, inst) => sum + (parseFloat(inst.amount) || 0), 0);
+      const calculatedRemaining = Math.max(0, totalAmount - totalPaid);
+      
+      // Use calculated remaining if different from stored
+      const finalRemaining = remainingBalance !== calculatedRemaining ? calculatedRemaining : remainingBalance;
+      
+      return {
+        ...loan,
+        // Ensure all required fields
+        id: loan.id || `loan-${Date.now()}-${index}`,
+        personName: loan.personName || 'Unknown Person',
+        amount: loanAmount,
+        totalAmount: totalAmount,
+        remainingBalance: finalRemaining,
+        installments: installments,
+        status: loan.status || (finalRemaining <= 0 ? 'paid' : 'active'),
+        isPaid: finalRemaining <= 0,
+        interestRate: parseFloat(loan.interestRate) || 0,
+        date: loan.date || new Date().toISOString().split('T')[0],
+        dueDate: loan.dueDate || '',
+        description: loan.description || ''
+      };
+    });
+  }, [state.loans]);
+
+  // Filter loans
+  const filteredLoans = useMemo(() => {
+    return normalizedLoans.filter(loan => {
+      if (filterStatus === 'all') return true;
+      return loan.status === filterStatus;
+    });
+  }, [normalizedLoans, filterStatus]);
+
+  // Handle add loan
   const handleAddLoan = () => {
+    console.log('➕ Adding new loan:', newLoan);
+    
     if (!newLoan.personName || !newLoan.amount) {
       alert('Please fill in required fields');
       return;
     }
-    actions.addLoan({
-      ...newLoan,
-      amount: parseFloat(newLoan.amount) || 0,
-      interestRate: parseFloat(newLoan.interestRate) || 0
-    });
-    setNewLoan({ 
-      personName: '', 
-      amount: '', 
-      interestRate: '', 
-      date: new Date().toISOString().split('T')[0], 
-      dueDate: '', 
-      description: '' 
-    });
-    setOpenDialog(false);
+    
+    const loanData = {
+      personName: newLoan.personName.trim(),
+      amount: newLoan.amount,
+      interestRate: newLoan.interestRate,
+      date: newLoan.date,
+      dueDate: newLoan.dueDate,
+      description: newLoan.description
+    };
+    
+    try {
+      actions.addLoan(loanData);
+      
+      // Reset form
+      setNewLoan({ 
+        personName: '', 
+        amount: '', 
+        interestRate: '', 
+        date: new Date().toISOString().split('T')[0], 
+        dueDate: '', 
+        description: '' 
+      });
+      setOpenDialog(false);
+      
+      alert('✅ Loan added successfully!');
+    } catch (error) {
+      console.error('Error adding loan:', error);
+      alert('Error adding loan. Please try again.');
+    }
   };
 
+  // Handle add payment - FIXED VERSION
   const handleAddPayment = () => {
-    if (!payment.amount || parseFloat(payment.amount) <= 0) {
+    console.log('💰 Adding payment for loan:', selectedLoan);
+    console.log('Payment data:', payment);
+    
+    if (!selectedLoan?.id) {
+      alert('Error: No loan selected');
+      return;
+    }
+    
+    const paymentAmount = parseFloat(payment.amount) || 0;
+    if (!paymentAmount || paymentAmount <= 0) {
       alert('Please enter a valid payment amount');
       return;
     }
-    if (!selectedLoan?.id) {
-      alert('No loan selected');
+    
+    // Validate payment doesn't exceed remaining balance
+    const remainingBalance = parseFloat(selectedLoan.remainingBalance) || 0;
+    if (paymentAmount > remainingBalance) {
+      alert(`Payment amount (${safeFormatCurrency(paymentAmount, currency)}) exceeds remaining balance (${safeFormatCurrency(remainingBalance, currency)})`);
       return;
     }
-    actions.addLoanInstallment(selectedLoan.id, {
-      ...payment,
-      amount: parseFloat(payment.amount) || 0
-    });
-    setPayment({ 
-      amount: '', 
-      date: new Date().toISOString().split('T')[0], 
-      notes: '' 
-    });
-    setOpenPaymentDialog(false);
-    setSelectedLoan(null);
-  };
-
-  const handleDeleteLoan = (id) => {
-    if (window.confirm('Are you sure you want to delete this loan?')) {
-      actions.deleteLoan(id);
+    
+    const paymentData = {
+      amount: paymentAmount,
+      date: payment.date,
+      notes: payment.notes.trim()
+    };
+    
+    console.log('📤 Calling addLoanInstallment with:', selectedLoan.id, paymentData);
+    
+    try {
+      const success = actions.addLoanInstallment(selectedLoan.id, paymentData);
+      
+      if (success !== false) {
+        // Reset form
+        setPayment({ 
+          amount: '', 
+          date: new Date().toISOString().split('T')[0], 
+          notes: '' 
+        });
+        setOpenPaymentDialog(false);
+        setSelectedLoan(null);
+        
+        // Show success
+        alert(`✅ Payment of ${safeFormatCurrency(paymentAmount, currency)} recorded successfully!`);
+      }
+    } catch (error) {
+      console.error('Error adding payment:', error);
+      alert('Error adding payment. Please try again.');
     }
   };
 
+  // Handle delete loan
+  const handleDeleteLoan = (id) => {
+    console.log('🗑️ Deleting loan:', id);
+    
+    if (window.confirm('Are you sure you want to delete this loan?')) {
+      try {
+        actions.deleteLoan(id);
+        alert('✅ Loan deleted successfully!');
+      } catch (error) {
+        console.error('Error deleting loan:', error);
+        alert('Error deleting loan. Please try again.');
+      }
+    }
+  };
+
+  // Open payment dialog
   const openPaymentForLoan = (loan) => {
+    console.log('💳 Opening payment for loan:', loan);
+    
     if (!loan?.id) {
       alert('Invalid loan');
       return;
     }
+    
     setSelectedLoan(loan);
     setOpenPaymentDialog(true);
   };
 
+  // Calculate loan progress
   const getLoanProgress = (loan) => {
-    if (!loan || !loan.totalAmount) return 0;
+    if (!loan || !loan.totalAmount || loan.totalAmount <= 0) return 0;
     const remaining = parseFloat(loan.remainingBalance) || 0;
     const total = parseFloat(loan.totalAmount) || 0;
-    if (total <= 0) return 0;
-    return ((total - remaining) / total) * 100;
+    return Math.min(100, ((total - remaining) / total) * 100);
   };
 
+  // Toggle expand loan
   const toggleExpandLoan = (loanId) => {
     setExpandedLoanId(expandedLoanId === loanId ? null : loanId);
   };
 
-  // Get payment history for a loan
+  // Get payment history
   const getPaymentHistory = (loan) => {
     if (!loan || !loan.installments) return [];
     return loan.installments || [];
   };
 
-  // Get total payments made
+  // Get total payments
   const getTotalPayments = (loan) => {
     if (!loan || !loan.installments) return 0;
     const installments = loan.installments || [];
     return installments.reduce((sum, installment) => sum + (parseFloat(installment.amount) || 0), 0);
   };
 
-  // Get next payment due date
+  // Get next payment due
   const getNextPaymentDue = (loan) => {
-    if (!loan || loan.status === 'paid') return 'Paid Off';
+    if (!loan || loan.status === 'paid' || loan.remainingBalance <= 0) return 'Paid Off';
     if (loan.dueDate) return loan.dueDate;
-    return 'No due date set';
+    return 'No due date';
   };
 
-  const totalLoans = (state.loans || []).reduce((sum, l) => {
-    if (!l) return sum;
-    return sum + (parseFloat(l.totalAmount) || 0);
-  }, 0);
-  
-  const activeLoans = (state.loans || []).filter(l => l?.status === 'active').length;
-  
-  const pendingAmount = (state.loans || []).reduce((sum, l) => {
-    if (!l) return sum;
-    return sum + (parseFloat(l.remainingBalance) || 0);
-  }, 0);
+  // Calculate statistics
+  const totalLoans = normalizedLoans.reduce((sum, l) => sum + (parseFloat(l.totalAmount) || 0), 0);
+  const activeLoans = normalizedLoans.filter(l => l.status === 'active').length;
+  const pendingAmount = normalizedLoans.reduce((sum, l) => sum + (parseFloat(l.remainingBalance) || 0), 0);
 
   return (
     <Box>
       {/* Header */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" fontWeight={700} color="#1e293b">Loans Management</Typography>
-        <Typography variant="body2" color="textSecondary">Track loans given to others with detailed payment history</Typography>
+        <Typography variant="body2" color="textSecondary">
+          Track loans given to others. Total: {normalizedLoans.length} loan(s)
+        </Typography>
       </Box>
 
       {/* Summary Cards */}
@@ -192,7 +291,7 @@ const Loans = () => {
         <Grid item xs={12} sm={4}>
           <Card sx={{ bgcolor: '#fef3c7', border: '1px solid #fde68a' }}>
             <CardContent>
-              <Box sx={{ display: '-flex', alignItems: 'center', mb: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                 <Avatar sx={{ bgcolor: '#d97706', mr: 1.5 }}><PendingIcon /></Avatar>
                 <Typography color="textSecondary" variant="body2">Pending Amount</Typography>
               </Box>
@@ -237,6 +336,7 @@ const Loans = () => {
             <MenuItem value="paid">Paid</MenuItem>
           </Select>
         </FormControl>
+        
         <Button 
           variant="contained" 
           startIcon={<AddIcon />} 
@@ -249,6 +349,22 @@ const Loans = () => {
           Add New Loan
         </Button>
       </Paper>
+
+      {/* Debug Panel - Remove in production */}
+      <Box sx={{ mb: 2, p: 1, bgcolor: '#f5f5f5', borderRadius: 1, display: 'none' }}>
+        <Typography variant="caption" color="textSecondary">
+          Debug: {normalizedLoans.length} loans loaded
+        </Typography>
+        <Button 
+          size="small" 
+          onClick={() => {
+            console.log('🔍 Current loans:', normalizedLoans);
+            console.log('💾 LocalStorage:', JSON.parse(localStorage.getItem('cashManagementData') || '{}'));
+          }}
+        >
+          Log Data
+        </Button>
+      </Box>
 
       {/* Loans Table */}
       <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
@@ -285,7 +401,7 @@ const Loans = () => {
                   const isExpanded = expandedLoanId === loan.id;
                   
                   return (
-                    <React.Fragment key={loan?.id || Math.random()}>
+                    <React.Fragment key={loan.id}>
                       {/* Main Loan Row */}
                       <TableRow hover>
                         <TableCell>
@@ -306,11 +422,11 @@ const Loans = () => {
                               mr: 1.5, 
                               fontSize: '0.9rem' 
                             }}>
-                              {loan?.personName?.charAt(0)?.toUpperCase() || '?'}
+                              {loan.personName?.charAt(0)?.toUpperCase() || '?'}
                             </Avatar>
                             <Box>
                               <Typography variant="body2" fontWeight={500}>
-                                {loan?.personName || 'Unknown Person'}
+                                {loan.personName}
                               </Typography>
                               <Typography variant="caption" color="textSecondary">
                                 {payments.length} payment{payments.length !== 1 ? 's' : ''}
@@ -319,7 +435,7 @@ const Loans = () => {
                           </Box>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2">{loan?.date || '-'}</Typography>
+                          <Typography variant="body2">{loan.date}</Typography>
                         </TableCell>
                         {!isMobile && (
                           <TableCell>
@@ -330,7 +446,7 @@ const Loans = () => {
                         )}
                         <TableCell align="right">
                           <Typography variant="body1" fontWeight={600}>
-                            {safeFormatCurrency(loan?.totalAmount || 0, currency)}
+                            {safeFormatCurrency(loan.totalAmount, currency)}
                           </Typography>
                         </TableCell>
                         <TableCell align="right">
@@ -345,14 +461,14 @@ const Loans = () => {
                         </TableCell>
                         <TableCell>
                           <Chip 
-                            label={loan?.status === 'active' ? 'Active' : 'Paid'} 
-                            color={loan?.status === 'active' ? 'warning' : 'success'} 
+                            label={loan.status === 'active' ? 'Active' : 'Paid'} 
+                            color={loan.status === 'active' ? 'warning' : 'success'} 
                             size="small" 
                           />
                         </TableCell>
                         <TableCell align="center">
                           <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
-                            {loan?.status === 'active' && (
+                            {loan.status === 'active' && balance > 0 && (
                               <Tooltip title="Add Payment">
                                 <IconButton 
                                   size="small" 
@@ -377,7 +493,7 @@ const Loans = () => {
                               <IconButton 
                                 size="small" 
                                 color="error" 
-                                onClick={() => handleDeleteLoan(loan?.id)}
+                                onClick={() => handleDeleteLoan(loan.id)}
                               >
                                 <DeleteIcon fontSize="small" />
                               </IconButton>
@@ -396,56 +512,50 @@ const Loans = () => {
                                   📋 Payment History - {loan.personName}
                                 </Typography>
                                 <Paper variant="outlined" sx={{ p: 2, bgcolor: '#fefefe' }}>
-                                  {payments.length === 0 ? (
-                                    <Typography variant="body2" color="textSecondary" align="center" py={2}>
-                                      No payments made yet
-                                    </Typography>
-                                  ) : (
-                                    <List dense>
-                                      {payments.map((payment, index) => (
-                                        <ListItem 
-                                          key={index}
-                                          divider={index < payments.length - 1}
-                                          sx={{ 
-                                            borderRadius: 1,
-                                            mb: 0.5,
-                                            '&:hover': { bgcolor: '#f5f5f5' }
-                                          }}
-                                        >
-                                          <ListItemAvatar>
-                                            <Avatar sx={{ bgcolor: '#4caf50', width: 32, height: 32 }}>
-                                              <ReceivedIcon fontSize="small" />
-                                            </Avatar>
-                                          </ListItemAvatar>
-                                          <ListItemText
-                                            primary={
-                                              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                <Typography variant="body2" fontWeight={500}>
-                                                  {safeFormatCurrency(payment.amount || 0, currency)}
-                                                </Typography>
-                                                <Typography variant="caption" color="textSecondary">
-                                                  {payment.date || 'No date'}
-                                                </Typography>
-                                              </Box>
-                                            }
-                                            secondary={
-                                              <Typography variant="caption" color="textSecondary">
-                                                {payment.notes || 'No notes'}
+                                  <List dense>
+                                    {payments.map((payment, index) => (
+                                      <ListItem 
+                                        key={index}
+                                        divider={index < payments.length - 1}
+                                        sx={{ 
+                                          borderRadius: 1,
+                                          mb: 0.5,
+                                          '&:hover': { bgcolor: '#f5f5f5' }
+                                        }}
+                                      >
+                                        <ListItemAvatar>
+                                          <Avatar sx={{ bgcolor: '#4caf50', width: 32, height: 32 }}>
+                                            <ReceivedIcon fontSize="small" />
+                                          </Avatar>
+                                        </ListItemAvatar>
+                                        <ListItemText
+                                          primary={
+                                            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                              <Typography variant="body2" fontWeight={500}>
+                                                {safeFormatCurrency(payment.amount, currency)}
                                               </Typography>
-                                            }
+                                              <Typography variant="caption" color="textSecondary">
+                                                {payment.date || 'No date'}
+                                              </Typography>
+                                            </Box>
+                                          }
+                                          secondary={
+                                            <Typography variant="caption" color="textSecondary">
+                                              {payment.notes || 'No notes'}
+                                            </Typography>
+                                          }
+                                        />
+                                        <ListItemSecondaryAction>
+                                          <Chip 
+                                            label={`#${index + 1}`} 
+                                            size="small" 
+                                            variant="outlined"
+                                            color="primary"
                                           />
-                                          <ListItemSecondaryAction>
-                                            <Chip 
-                                              label={`#${index + 1}`} 
-                                              size="small" 
-                                              variant="outlined"
-                                              color="primary"
-                                            />
-                                          </ListItemSecondaryAction>
-                                        </ListItem>
-                                      ))}
-                                    </List>
-                                  )}
+                                        </ListItemSecondaryAction>
+                                      </ListItem>
+                                    ))}
+                                  </List>
                                   
                                   {/* Summary */}
                                   <Box sx={{ mt: 2, p: 2, bgcolor: '#f8f9fa', borderRadius: 1 }}>
@@ -522,7 +632,7 @@ const Loans = () => {
               <Grid item xs={12}>
                 <TextField 
                   fullWidth 
-                  label="Person Name" 
+                  label="Person Name *" 
                   value={newLoan.personName} 
                   onChange={(e) => setNewLoan({...newLoan, personName: e.target.value})} 
                   required 
@@ -531,7 +641,7 @@ const Loans = () => {
               <Grid item xs={12} sm={6}>
                 <TextField 
                   fullWidth 
-                  label="Amount" 
+                  label="Amount *" 
                   type="number" 
                   value={newLoan.amount} 
                   onChange={(e) => setNewLoan({...newLoan, amount: e.target.value})}
@@ -626,7 +736,7 @@ const Loans = () => {
             
             <TextField 
               fullWidth 
-              label="Payment Amount" 
+              label="Payment Amount *" 
               type="number" 
               value={payment.amount} 
               onChange={(e) => setPayment({...payment, amount: e.target.value})}
@@ -634,7 +744,8 @@ const Loans = () => {
                 startAdornment: <Typography sx={{ mr: 1 }}>{currency}</Typography>,
                 inputProps: { 
                   max: selectedLoan?.remainingBalance || 0,
-                  min: 0
+                  min: 0,
+                  step: 0.01
                 }
               }} 
               sx={{ mb: 2 }} 
@@ -664,6 +775,7 @@ const Loans = () => {
           <Button 
             onClick={handleAddPayment} 
             variant="contained" 
+            disabled={!payment.amount || parseFloat(payment.amount) <= 0}
             sx={{ 
               bgcolor: '#16a34a', 
               '&:hover': { bgcolor: '#15803d' } 
